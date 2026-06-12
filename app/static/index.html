@@ -46,14 +46,37 @@
 <script>
 let form = { title: "Untitled Form", fields: [] };
 
-async function send(message) {
-  const res = await fetch("/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, form }),
-  });
-  if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-  const data = await res.json();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function send(message, attempt = 1) {
+  let res;
+  try {
+    res = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, form }),
+    });
+  } catch (netErr) {
+    throw new Error("Network error — is the service reachable? " + netErr.message);
+  }
+
+  // Read as text first so a non-JSON (HTML) response can't throw a cryptic
+  // "Unexpected token '<'". Render returns an HTML page during cold starts.
+  const raw = await res.text();
+  let data = null;
+  try { data = JSON.parse(raw); } catch (_) { /* not JSON */ }
+
+  if (!res.ok || data === null) {
+    const coldStart = res.status === 502 || res.status === 503 || data === null;
+    if (coldStart && attempt < 3) {
+      log("Service is waking up (free-tier cold start)… retrying", "you");
+      await sleep(4000);
+      return send(message, attempt + 1);  // form is unchanged, safe to retry
+    }
+    const detail = (data && data.detail) || `HTTP ${res.status} ${res.statusText}`;
+    throw new Error(detail);
+  }
+
   form = data.form;
   document.getElementById("brain").textContent = "· brain: " + data.brain;
   render();
