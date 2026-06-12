@@ -44,7 +44,9 @@
   </section>
 </main>
 <script>
-let form = { title: "Untitled Form", fields: [] };
+// Current coltorapps schema ({entities, root}) + form title.
+let schema = { entities: {}, root: [] };
+let title = "Untitled Form";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -54,7 +56,7 @@ async function send(message, attempt = 1) {
     res = await fetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, form }),
+      body: JSON.stringify({ message, schema, title }),
     });
   } catch (netErr) {
     throw new Error("Network error — is the service reachable? " + netErr.message);
@@ -71,36 +73,48 @@ async function send(message, attempt = 1) {
     if (coldStart && attempt < 3) {
       log("Service is waking up (free-tier cold start)… retrying", "you");
       await sleep(4000);
-      return send(message, attempt + 1);  // form is unchanged, safe to retry
+      return send(message, attempt + 1);  // state unchanged, safe to retry
     }
     const detail = (data && data.detail) || `HTTP ${res.status} ${res.statusText}`;
     throw new Error(detail);
   }
 
-  form = data.form;
+  schema = data.schema;
+  title = data.title;
   document.getElementById("brain").textContent = "· brain: " + data.brain;
   render();
 }
 
+// Render a preview from the coltorapps schema ({entities, root}).
 function render() {
-  document.getElementById("formTitle").textContent = form.title;
+  document.getElementById("formTitle").textContent = title;
   const box = document.getElementById("fields");
   box.innerHTML = "";
-  for (const f of form.fields) {
+  for (const id of (schema.root || [])) {
+    const e = (schema.entities || {})[id];
+    if (!e) continue;
+    const a = e.attributes || {};
     const row = document.createElement("div");
     row.className = "row";
-    const label = `<label>${f.label}${f.required ? ' <span class="req">*</span>' : ""}</label>`;
+    const label = `<label>${a.label || id}${a.required ? ' <span class="req">*</span>' : ""}</label>`;
+    const opts = (a.options || []).map(o => `<option>${typeof o === "string" ? o : (o.label || o.value)}</option>`).join("");
     let control;
-    if (f.type === "dropdown") {
-      control = `<select>${(f.options || []).map(o => `<option>${o}</option>`).join("")}</select>`;
-    } else if (f.type === "textarea") {
-      control = `<textarea rows="3" placeholder="${f.placeholder || ""}"></textarea>`;
-    } else if (f.type === "checkbox") {
+    if (e.type === "select") {
+      control = `<select>${opts}</select>`;
+    } else if (e.type === "radio" || e.type === "selectBoxes") {
+      const t = e.type === "radio" ? "radio" : "checkbox";
+      control = (a.options || []).map(o => {
+        const v = typeof o === "string" ? o : (o.label || o.value);
+        return `<div><input type="${t}" name="${id}" style="width:auto" /> ${v}</div>`;
+      }).join("");
+    } else if (e.type === "textarea") {
+      control = `<textarea rows="3" placeholder="${a.placeholder || ""}"></textarea>`;
+    } else if (e.type === "checkbox") {
       control = `<input type="checkbox" style="width:auto" />`;
     } else {
-      const t = f.type === "email" ? "email" : f.type === "number" ? "number"
-        : f.type === "date" ? "date" : "text";
-      control = `<input type="${t}" placeholder="${f.placeholder || ""}" />`;
+      const t = e.type === "email" ? "email" : e.type === "number" || e.type === "currency" ? "number"
+        : e.type === "datetime" ? "datetime-local" : e.type === "phoneNumber" ? "tel" : "text";
+      control = `<input type="${t}" placeholder="${a.placeholder || ""}" />`;
     }
     row.innerHTML = label + control;
     box.appendChild(row);
