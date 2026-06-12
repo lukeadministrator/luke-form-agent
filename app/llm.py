@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 
-from .schema import FormSpec
+from .schema import AssistantTurn, FormSpec
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
@@ -45,6 +45,8 @@ Allowed `type` values (use the closest fit):
 - "radio"        radio buttons (single choice) -> MUST include `options`
 - "selectBoxes"  multiple checkboxes (multi choice) -> MUST include `options`
 
+You also reply to the user conversationally, like a friendly product assistant.
+
 Rules:
 - Return the ENTIRE form every turn, never just the delta.
 - Preserve existing fields, their keys, and their order unless the user asks to
@@ -52,6 +54,12 @@ Rules:
   relabeling — the key is its stable identity.
 - Choice types (select/radio/selectBoxes) MUST have a non-empty `options` list.
 - Non-choice types MUST NOT have `options`.
+- `reply`: a short, warm, FIRST-PERSON message describing what you just did (or a
+  clarifying question if the request is ambiguous). 1-3 sentences, natural and
+  specific — name the fields you added/changed. No JSON, no markdown.
+- `suggestions`: 2-4 genuinely useful next steps tailored to THIS form, phrased as
+  short imperatives the user could click (e.g. "Add a phone number",
+  "Make email optional", "Add a subject dropdown"). Each under ~6 words.
 - Output ONLY the JSON object — no prose, no markdown fences."""
 
 
@@ -70,7 +78,7 @@ def active_brain() -> str:
     return "ollama"
 
 
-def generate_spec(current: FormSpec, message: str) -> FormSpec:
+def generate_turn(current: FormSpec, message: str) -> AssistantTurn:
     brain = active_brain()
     if brain == "groq":
         return _groq(current, message)
@@ -79,14 +87,14 @@ def generate_spec(current: FormSpec, message: str) -> FormSpec:
     return _ollama(current, message)
 
 
-def _groq(current: FormSpec, message: str) -> FormSpec:
+def _groq(current: FormSpec, message: str) -> AssistantTurn:
     from groq import Groq
 
     client = Groq(api_key=GROQ_API_KEY)
     # Groq JSON mode needs the target shape in the prompt, so embed the schema.
     system = (
         f"{SYSTEM}\n\nThe JSON object MUST conform to this JSON Schema:\n"
-        f"{json.dumps(FormSpec.model_json_schema())}"
+        f"{json.dumps(AssistantTurn.model_json_schema())}"
     )
     resp = client.chat.completions.create(
         model=GROQ_MODEL,
@@ -95,12 +103,12 @@ def _groq(current: FormSpec, message: str) -> FormSpec:
             {"role": "user", "content": _prompt(current, message)},
         ],
         response_format={"type": "json_object"},  # forces valid JSON
-        temperature=0.2,
+        temperature=0.3,
     )
-    return FormSpec.model_validate_json(resp.choices[0].message.content)
+    return AssistantTurn.model_validate_json(resp.choices[0].message.content)
 
 
-def _gemini(current: FormSpec, message: str) -> FormSpec:
+def _gemini(current: FormSpec, message: str) -> AssistantTurn:
     from google import genai
     from google.genai import types
 
@@ -111,14 +119,14 @@ def _gemini(current: FormSpec, message: str) -> FormSpec:
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM,
             response_mime_type="application/json",
-            response_schema=FormSpec,  # forces schema-shaped JSON
-            temperature=0.2,
+            response_schema=AssistantTurn,  # forces schema-shaped JSON
+            temperature=0.3,
         ),
     )
-    return FormSpec.model_validate_json(resp.text)
+    return AssistantTurn.model_validate_json(resp.text)
 
 
-def _ollama(current: FormSpec, message: str) -> FormSpec:
+def _ollama(current: FormSpec, message: str) -> AssistantTurn:
     import ollama
 
     resp = ollama.chat(
@@ -127,7 +135,7 @@ def _ollama(current: FormSpec, message: str) -> FormSpec:
             {"role": "system", "content": SYSTEM},
             {"role": "user", "content": _prompt(current, message)},
         ],
-        format=FormSpec.model_json_schema(),  # forces schema-shaped JSON
-        options={"temperature": 0.2},
+        format=AssistantTurn.model_json_schema(),  # forces schema-shaped JSON
+        options={"temperature": 0.3},
     )
-    return FormSpec.model_validate_json(resp["message"]["content"])
+    return AssistantTurn.model_validate_json(resp["message"]["content"])

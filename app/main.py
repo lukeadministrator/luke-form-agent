@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from .coltorapps import schema_to_spec, spec_to_schema
-from .llm import active_brain, generate_spec
+from .llm import active_brain, generate_turn
 from .schema import ChatRequest, ChatResponse
 
 load_dotenv()
@@ -54,12 +54,18 @@ def chat(req: ChatRequest) -> ChatResponse:
         spec.title = req.title
 
     try:
-        updated = generate_spec(spec, req.message)
+        turn = generate_turn(spec, req.message)
     except Exception as exc:  # invalid JSON, model/network error, etc.
         raise HTTPException(status_code=502, detail=f"brain error: {exc}") from exc
 
-    out_schema = spec_to_schema(updated, existing, preserved_entities, preserved_root_ids)
-    return ChatResponse(schema=out_schema, title=updated.title, brain=active_brain())
+    out_schema = spec_to_schema(turn, existing, preserved_entities, preserved_root_ids)
+    return ChatResponse(
+        schema=out_schema,
+        title=turn.title,
+        reply=turn.reply,
+        suggestions=turn.suggestions,
+        brain=active_brain(),
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

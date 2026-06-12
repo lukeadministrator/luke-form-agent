@@ -47,6 +47,21 @@ class FormSpec(BaseModel):
     fields: List[SpecField] = PydField(default_factory=list)
 
 
+class AssistantTurn(FormSpec):
+    """What the LLM returns each turn: the complete form PLUS a conversational
+    reply and a few suggested next steps the user can act on."""
+    reply: str = PydField(
+        default="",
+        description="Friendly, first-person natural-language reply describing what you did "
+        "(or a clarifying question). 1-3 sentences, conversational.",
+    )
+    suggestions: List[str] = PydField(
+        default_factory=list,
+        description="2-4 short, actionable next-step ideas as imperatives, e.g. "
+        "'Add a phone number'. Each under ~6 words.",
+    )
+
+
 class ChatRequest(BaseModel):
     """One turn. Stateless: the client (the Form Builder) sends the current
     coltorapps schema back each time, so the agent needs no storage."""
@@ -60,4 +75,6 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     schema: dict  # updated coltorapps schema, ready for builderStore / saveDraft
     title: str
+    reply: str = ""  # natural-language message to show the user
+    suggestions: List[str] = []  # clickable next-step ideas
     brain: str  # which LLM produced this ("groq" | "gemini" | "ollama")
