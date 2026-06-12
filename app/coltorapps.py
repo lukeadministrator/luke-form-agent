@@ -28,9 +28,16 @@ from .schema import CHOICE_TYPES, FormSpec, SpecField
 
 # coltorapps leaf field types we let the LLM build/edit. Anything else
 # (containers, content, file/signature/tags/etc.) is preserved untouched.
+# Every one of these spreads the `api` attribute group, so `key` is always valid.
 KNOWN_FIELD_TYPES = {
     "textField", "textarea", "number", "email", "phoneNumber",
     "checkbox", "select", "radio", "selectBoxes", "datetime", "currency",
+}
+
+# Types whose coltorapps definition includes `placeholderAttribute`. Setting
+# `placeholder` on any other type produces an "Unknown entity attribute" schema.
+PLACEHOLDER_TYPES = {
+    "textField", "textarea", "number", "email", "phoneNumber", "currency", "select",
 }
 
 
@@ -117,12 +124,20 @@ def spec_to_schema(
             eid = _new_id()
         used.add(eid)
 
-        attrs = dict(prev["attributes"]) if prev else {}
+        # Merge onto the prior attributes ONLY when the type is unchanged — a
+        # different type has a different (incompatible) attribute set, so reusing
+        # e.g. textField's minLength on a select would be an invalid attribute.
+        same_type = bool(prev) and prev.get("type") == f.type
+        attrs = dict(prev["attributes"]) if same_type else {}
+
         attrs["label"] = f.label
         attrs["key"] = f.key
         attrs["required"] = f.required
-        if f.placeholder is not None:
+
+        if f.type in PLACEHOLDER_TYPES and f.placeholder is not None:
             attrs["placeholder"] = f.placeholder
+        elif f.type not in PLACEHOLDER_TYPES:
+            attrs.pop("placeholder", None)  # strip if carried from a prior type
 
         if f.type in CHOICE_TYPES:
             attrs["options"] = f.options or ["Option 1"]
