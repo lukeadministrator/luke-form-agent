@@ -42,7 +42,9 @@ PLACEHOLDER_TYPES = {
 
 
 def _new_id() -> str:
-    return uuid.uuid4().hex[:12]
+    # coltorapps validates entity ids as canonical UUIDs (8-4-4-4-12); a
+    # truncated hex string is rejected by validateEntityId.
+    return str(uuid.uuid4())
 
 
 def schema_to_spec(schema: dict | None) -> tuple[FormSpec, dict, dict, list]:
