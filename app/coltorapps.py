@@ -6,22 +6,28 @@ luke-capability-engine's draftSchema expect):
     {
       "entities": {
         "<id>": { "type": "textField", "attributes": { "label": ..., "key": ..., "required": ... } },
+        "<id>": { "type": "panel", "attributes": {...}, "children": ["<id>", ...] },
         ...
       },
-      "root": ["<id>", "<id>", ...]   # top-level field order
+      "root": ["<id>", "<id>", ...]   # top-level order
     }
 
 The submission key for a field is `attributes.key` (falling back to the entity
 id). We always set `key` explicitly so data keys are stable across edits.
+
+We only expose flat, top-level "simple" fields to the LLM. Everything else
+(containers, their nested children, and advanced field types we don't model) is
+preserved verbatim so AI edits never corrupt a complex form. Preserved
+top-level entities are kept after the simple fields in `root`.
 """
 from __future__ import annotations
 
 import uuid
 
-from .schema import CHOICE_TYPES, FieldType, FormSpec, SpecField
+from .schema import CHOICE_TYPES, FormSpec, SpecField
 
-# coltorapps field types we understand on the way IN (schema -> spec). Anything
-# else (containers, content, layout) is left untouched and preserved verbatim.
+# coltorapps leaf field types we let the LLM build/edit. Anything else
+# (containers, content, file/signature/tags/etc.) is preserved untouched.
 KNOWN_FIELD_TYPES = {
     "textField", "textarea", "number", "email", "phoneNumber",
     "checkbox", "select", "radio", "selectBoxes", "datetime", "currency",
@@ -33,14 +39,14 @@ def _new_id() -> str:
 
 
 def schema_to_spec(schema: dict | None) -> tuple[FormSpec, dict, dict, list]:
-    """Project an incoming coltorapps schema down to a flat FormSpec the LLM can
-    edit. Also return bookkeeping needed to rebuild without losing data:
+    """Project a coltorapps schema down to a flat FormSpec the LLM can edit, plus
+    the bookkeeping needed to rebuild without losing anything:
 
-      - existing: {key -> {"id", "type", "attributes"}} for known simple fields,
-        so edits can merge onto (preserve) the original attributes.
-      - preserved_entities: {id -> entity} for entities we DON'T expose to the
-        LLM (containers/content/unknown) — carried through unchanged.
-      - preserved_root_ids: their ids, kept so they survive in `root`.
+      - existing: {key -> {"id","type","attributes"}} for simple fields, so edits
+        merge onto (preserve) the original attributes / entity id.
+      - preserved_entities: {id -> entity} for EVERY entity that isn't a rebuilt
+        simple field — containers AND their nested children — carried verbatim.
+      - preserved_root_ids: the top-level ids among those, kept for `root`.
     """
     schema = schema or {}
     entities = schema.get("entities", {}) or {}
@@ -48,7 +54,7 @@ def schema_to_spec(schema: dict | None) -> tuple[FormSpec, dict, dict, list]:
 
     fields: list[SpecField] = []
     existing: dict = {}
-    preserved_entities: dict = {}
+    simple_ids: set = set()
     preserved_root_ids: list = []
 
     for eid in root:
@@ -57,7 +63,8 @@ def schema_to_spec(schema: dict | None) -> tuple[FormSpec, dict, dict, list]:
             continue
         etype = ent.get("type", "")
         attrs = ent.get("attributes", {}) or {}
-        if etype in KNOWN_FIELD_TYPES:
+        is_leaf = not ent.get("children")
+        if etype in KNOWN_FIELD_TYPES and is_leaf:
             key = str(attrs.get("key") or eid)
             opts = attrs.get("options")
             fields.append(
@@ -71,10 +78,15 @@ def schema_to_spec(schema: dict | None) -> tuple[FormSpec, dict, dict, list]:
                 )
             )
             existing[key] = {"id": eid, "type": etype, "attributes": dict(attrs)}
+            simple_ids.add(eid)
         else:
-            # Container / content / unknown — preserve as-is.
-            preserved_entities[eid] = ent
             preserved_root_ids.append(eid)
+
+    # Preserve every entity that isn't a rebuilt simple field — this includes
+    # containers AND their nested children (which never appear in `root`).
+    preserved_entities = {
+        eid: ent for eid, ent in entities.items() if eid not in simple_ids
+    }
 
     return FormSpec(fields=fields), existing, preserved_entities, preserved_root_ids
 
@@ -85,22 +97,27 @@ def spec_to_schema(
     preserved_entities: dict | None = None,
     preserved_root_ids: list | None = None,
 ) -> dict:
-    """Render a FormSpec into a coltorapps schema. For fields whose key matches
-    an existing entity, reuse its id and merge onto its attributes so advanced
-    builder settings (logic, validation, etc.) survive. Preserved non-field
-    entities are carried through and appended after the simple fields."""
+    """Render a FormSpec into a coltorapps schema. Fields whose key matches an
+    existing entity reuse its id and merge onto its attributes (so advanced
+    builder settings survive). Preserved entities are carried through verbatim;
+    preserved top-level ones are appended after the simple fields in `root`."""
     existing = existing or {}
     preserved_entities = dict(preserved_entities or {})
     preserved_root_ids = list(preserved_root_ids or [])
 
     entities: dict = {}
     root: list = []
+    used: set = set()
 
     for f in spec.fields:
         prev = existing.get(f.key)
         eid = prev["id"] if prev else _new_id()
-        attrs = dict(prev["attributes"]) if prev else {}
+        # Never collide with a preserved entity id or one already emitted.
+        while eid in preserved_entities or eid in used:
+            eid = _new_id()
+        used.add(eid)
 
+        attrs = dict(prev["attributes"]) if prev else {}
         attrs["label"] = f.label
         attrs["key"] = f.key
         attrs["required"] = f.required
@@ -115,10 +132,12 @@ def spec_to_schema(
         entities[eid] = {"type": f.type, "attributes": attrs}
         root.append(eid)
 
-    # Carry preserved entities through unchanged.
+    # Carry every preserved entity through unchanged (containers + their children).
+    for eid, ent in preserved_entities.items():
+        entities[eid] = ent
+    # Keep preserved top-level entities in `root`, after the simple fields.
     for eid in preserved_root_ids:
         if eid in preserved_entities:
-            entities[eid] = preserved_entities[eid]
             root.append(eid)
 
     return {"entities": entities, "root": root}
