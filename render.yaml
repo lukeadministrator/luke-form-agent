@@ -6,6 +6,10 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      # Pin Python to a version with prebuilt wheels for our deps. 3.14 has no
+      # pydantic-core wheel yet and would try (and fail) to compile from Rust.
+      - key: PYTHON_VERSION
+        value: "3.12.8"
       # Get a free key at https://console.groq.com/keys (email signup, no card)
       # and paste it in the Render dashboard (sync:false keeps it out of git).
       - key: GROQ_API_KEY
