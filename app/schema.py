@@ -26,6 +26,7 @@ FieldType = Literal[
     "selectBoxes",
     "datetime",
     "currency",
+    "button",
 ]
 
 CHOICE_TYPES = {"select", "radio", "selectBoxes"}
@@ -77,4 +78,5 @@ class ChatResponse(BaseModel):
     title: str
     reply: str = ""  # natural-language message to show the user
     suggestions: List[str] = []  # clickable next-step ideas
+    changed: bool = True  # False when the form was untouched (e.g. a question)
     brain: str  # which LLM produced this ("groq" | "gemini" | "ollama")

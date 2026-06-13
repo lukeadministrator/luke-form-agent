@@ -28,10 +28,10 @@ from .schema import CHOICE_TYPES, FormSpec, SpecField
 
 # coltorapps leaf field types we let the LLM build/edit. Anything else
 # (containers, content, file/signature/tags/etc.) is preserved untouched.
-# Every one of these spreads the `api` attribute group, so `key` is always valid.
+# All of these accept `label` and `key`.
 KNOWN_FIELD_TYPES = {
     "textField", "textarea", "number", "email", "phoneNumber",
-    "checkbox", "select", "radio", "selectBoxes", "datetime", "currency",
+    "checkbox", "select", "radio", "selectBoxes", "datetime", "currency", "button",
 }
 
 # Types whose coltorapps definition includes `placeholderAttribute`. Setting
@@ -39,6 +39,10 @@ KNOWN_FIELD_TYPES = {
 PLACEHOLDER_TYPES = {
     "textField", "textarea", "number", "email", "phoneNumber", "currency", "select",
 }
+
+# `button` is the odd one out: its attributes are only label/key/class/hidden/
+# disabled — no `required`, `placeholder`, or `options`.
+NO_REQUIRED_TYPES = {"button"}
 
 
 def _new_id() -> str:
@@ -134,7 +138,11 @@ def spec_to_schema(
 
         attrs["label"] = f.label
         attrs["key"] = f.key
-        attrs["required"] = f.required
+
+        if f.type in NO_REQUIRED_TYPES:
+            attrs.pop("required", None)
+        else:
+            attrs["required"] = f.required
 
         if f.type in PLACEHOLDER_TYPES and f.placeholder is not None:
             attrs["placeholder"] = f.placeholder

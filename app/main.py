@@ -59,11 +59,16 @@ def chat(req: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=502, detail=f"brain error: {exc}") from exc
 
     out_schema = spec_to_schema(turn, existing, preserved_entities, preserved_root_ids)
+    # Structural compare: equal dicts (any attr order) with equal root order means
+    # the form is untouched (a question / chit-chat) — the UI can skip re-applying.
+    current_schema = req.schema or {"entities": {}, "root": []}
+    changed = out_schema != current_schema
     return ChatResponse(
         schema=out_schema,
         title=turn.title,
         reply=turn.reply,
         suggestions=turn.suggestions,
+        changed=changed,
         brain=active_brain(),
     )
 

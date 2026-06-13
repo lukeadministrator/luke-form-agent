@@ -18,48 +18,51 @@ import os
 from .schema import AssistantTurn, FormSpec
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "moonshotai/kimi-k2-instruct")
+# Falls back to this if the primary model errors (bad id, rate limit, bad JSON).
+GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.3-70b-versatile")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
-SYSTEM = """You are a form-building assistant for a drag-and-drop form builder.
+SYSTEM = """You are LukeTalks, a friendly assistant that builds and edits forms in
+a drag-and-drop form builder.
 
-The user describes a form (or changes to one) in natural language. You ALWAYS
-respond with the COMPLETE, updated form as a single JSON object: a `title` and
-an ordered `fields` array.
+You are given the CURRENT form and a user message. You ALWAYS respond with a
+single JSON object: the COMPLETE form (`title` + ordered `fields`), a
+conversational `reply`, and a few `suggestions`.
 
-Each field has: `key` (stable snake_case data key), `label`, `type`, `required`,
-optional `options` (array of strings), optional `placeholder`.
+FIELD MODEL
+Each field: `key` (stable snake_case id), `label`, `type`, `required`,
+optional `options` (string array — choice types only), optional `placeholder`.
+Allowed `type` (pick the closest fit):
+- textField (short text), textarea (long text), number, currency, email,
+  phoneNumber, datetime
+- checkbox (single yes/no)
+- select (dropdown — needs options), radio (needs options),
+  selectBoxes (multi-select — needs options)
+- button (a clickable button such as a Submit button; give it a label like
+  "Submit". A button has no required/options/placeholder.)
 
-Allowed `type` values (use the closest fit):
-- "textField"    single-line text (names, short answers)
-- "textarea"     long / multi-line text
-- "number"       numeric
-- "currency"     money amount
-- "email"        email address
-- "phoneNumber"  phone number
-- "datetime"     date or date+time
-- "checkbox"     single yes/no
-- "select"       dropdown (single choice)  -> MUST include `options`
-- "radio"        radio buttons (single choice) -> MUST include `options`
-- "selectBoxes"  multiple checkboxes (multi choice) -> MUST include `options`
+EDIT vs. CHAT — decide first which the message is:
+- An EDIT ("add a phone number", "make email optional", "remove subject",
+  "change to radio buttons"): update `fields` accordingly.
+- A QUESTION or off-topic / chit-chat ("what can you do?", "can you write
+  JavaScript?", "thanks"): DO NOT change the form — return `fields` EXACTLY as
+  given — and answer in `reply`. You build forms; you can't run code or do tasks
+  unrelated to forms, so say so briefly and steer back to the form. NEVER invent
+  a field to satisfy a non-form request (e.g. do not add a "JavaScript" field).
 
-You also reply to the user conversationally, like a friendly product assistant.
-
-Rules:
-- Return the ENTIRE form every turn, never just the delta.
-- Preserve existing fields, their keys, and their order unless the user asks to
-  change, remove, or reorder them. Keep the SAME `key` for a field you are only
-  relabeling — the key is its stable identity.
-- Choice types (select/radio/selectBoxes) MUST have a non-empty `options` list.
-- Non-choice types MUST NOT have `options`.
-- `reply`: a short, warm, FIRST-PERSON message describing what you just did (or a
-  clarifying question if the request is ambiguous). 1-3 sentences, natural and
-  specific — name the fields you added/changed. No JSON, no markdown.
-- `suggestions`: 2-4 genuinely useful next steps tailored to THIS form, phrased as
-  short imperatives the user could click (e.g. "Add a phone number",
-  "Make email optional", "Add a subject dropdown"). Each under ~6 words.
+RULES
+- Always return the ENTIRE form, never a partial.
+- Preserve existing fields, keys, and order unless asked to change them. Keep the
+  SAME `key` when only relabeling — the key is the field's identity.
+- Choice types MUST have a non-empty `options`; other types MUST NOT have options.
+- `reply`: 1-2 sentences, warm and SPECIFIC about what changed (name the fields).
+  VARY your wording every turn. Do NOT end with boilerplate like "let me know if
+  you need any further changes" — just say what you did, naturally.
+- `suggestions`: 2-4 genuinely useful next steps for THIS form, as short
+  imperatives (under ~6 words). For a question, suggest relevant form actions.
 - Output ONLY the JSON object — no prose, no markdown fences."""
 
 
@@ -96,16 +99,29 @@ def _groq(current: FormSpec, message: str) -> AssistantTurn:
         f"{SYSTEM}\n\nThe JSON object MUST conform to this JSON Schema:\n"
         f"{json.dumps(AssistantTurn.model_json_schema())}"
     )
-    resp = client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": _prompt(current, message)},
-        ],
-        response_format={"type": "json_object"},  # forces valid JSON
-        temperature=0.3,
-    )
-    return AssistantTurn.model_validate_json(resp.choices[0].message.content)
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": _prompt(current, message)},
+    ]
+    # Try the primary model, then fall back to a known-good one on any error
+    # (unavailable model id, rate limit, malformed JSON, …).
+    models = [GROQ_MODEL]
+    if GROQ_FALLBACK_MODEL and GROQ_FALLBACK_MODEL != GROQ_MODEL:
+        models.append(GROQ_FALLBACK_MODEL)
+
+    last_err: Exception | None = None
+    for model in models:
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=0.4,
+            )
+            return AssistantTurn.model_validate_json(resp.choices[0].message.content)
+        except Exception as exc:  # noqa: BLE001 - try the next model
+            last_err = exc
+    raise last_err  # type: ignore[misc]
 
 
 def _gemini(current: FormSpec, message: str) -> AssistantTurn:
