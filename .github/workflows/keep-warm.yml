@@ -1,0 +1,26 @@
+name: keep-warm
+
+# Pings the deployed agent so Render's free instance doesn't spin down (which
+# would cause a ~30-50s cold start for the next user). GitHub Actions is free
+# for public repos. Note: scheduled runs can be delayed a few minutes under load
+# and are disabled after 60 days with no repo commits — for rock-solid uptime a
+# dedicated pinger (cron-job.org / UptimeRobot) is more reliable.
+#
+# Heads-up: keeping the instance always-on uses Render's free 750 instance-hours/
+# month (≈ one always-on service). If you run several free services, watch that
+# shared budget — or narrow the cron to business hours.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *" # every 10 minutes
+  workflow_dispatch: {} # allow manual runs
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          curl -sS --max-time 60 https://luke-form-agent.onrender.com/health \
+            && echo "" && echo "pinged ok" \
+            || echo "ping failed (instance may be waking)"

@@ -55,7 +55,16 @@ def chat(req: ChatRequest) -> ChatResponse:
 
     try:
         turn = generate_turn(spec, req.message)
-    except Exception as exc:  # invalid JSON, model/network error, etc.
+    except Exception as exc:  # invalid JSON, model/network error, rate limit, etc.
+        status = getattr(exc, "status_code", None)
+        text = str(exc).lower()
+        if status == 429 or "rate limit" in text or "429" in text:
+            # Shared free/cheap quota is momentarily exhausted — degrade nicely.
+            raise HTTPException(
+                status_code=429,
+                detail="LukeTalks is getting a lot of requests right now. "
+                "Please wait a few seconds and try again.",
+            ) from exc
         raise HTTPException(status_code=502, detail=f"brain error: {exc}") from exc
 
     out_schema = spec_to_schema(turn, existing, preserved_entities, preserved_root_ids)

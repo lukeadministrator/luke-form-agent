@@ -14,7 +14,8 @@ services:
       # and paste it in the Render dashboard (sync:false keeps it out of git).
       - key: GROQ_API_KEY
         sync: false
+      # Best capability-per-dollar. Use moonshotai/kimi-k2-instruct for premium.
       - key: GROQ_MODEL
-        value: moonshotai/kimi-k2-instruct
+        value: openai/gpt-oss-120b
       - key: GROQ_FALLBACK_MODEL
         value: llama-3.3-70b-versatile

@@ -12,13 +12,14 @@ the FormSpec into the coltorapps builder schema (see coltorapps.py).
 """
 from __future__ import annotations
 
-import json
 import os
 
 from .schema import AssistantTurn, FormSpec
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "moonshotai/kimi-k2-instruct")
+# Best capability-per-dollar on Groq. Set GROQ_MODEL=moonshotai/kimi-k2-instruct
+# for the premium option.
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 # Falls back to this if the primary model errors (bad id, rate limit, bad JSON).
 GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.3-70b-versatile")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -68,14 +69,14 @@ RULES
   as it deserves (a few sentences is usually plenty), genuinely and helpfully.
 - `suggestions`: 2-4 genuinely useful next steps as short imperatives (under ~6
   words) — form actions for an edit, or relevant follow-ups for a question.
-- Output ONLY the JSON object — no prose, no markdown fences."""
+
+Output ONLY this JSON object — no prose, no markdown fences:
+{"title": str, "fields": [{"key": str, "label": str, "type": <a type above>, "required": bool, "options": [str] or null, "placeholder": str or null}], "reply": str, "suggestions": [str]}"""
 
 
 def _prompt(current: FormSpec, message: str) -> str:
-    return (
-        f"Current form (JSON):\n{current.model_dump_json(indent=2)}\n\n"
-        f"User request:\n{message}"
-    )
+    # Compact JSON (no indent) to keep input tokens — and cost — down.
+    return f"Current form:\n{current.model_dump_json()}\n\nUser message:\n{message}"
 
 
 def active_brain() -> str:
@@ -99,13 +100,9 @@ def _groq(current: FormSpec, message: str) -> AssistantTurn:
     from groq import Groq
 
     client = Groq(api_key=GROQ_API_KEY)
-    # Groq JSON mode needs the target shape in the prompt, so embed the schema.
-    system = (
-        f"{SYSTEM}\n\nThe JSON object MUST conform to this JSON Schema:\n"
-        f"{json.dumps(AssistantTurn.model_json_schema())}"
-    )
+    # The compact output shape lives in SYSTEM, so no verbose JSON-schema dump.
     messages = [
-        {"role": "system", "content": system},
+        {"role": "system", "content": SYSTEM},
         {"role": "user", "content": _prompt(current, message)},
     ]
     # Try the primary model, then fall back to a known-good one on any error
