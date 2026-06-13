@@ -149,6 +149,14 @@ def spec_to_schema(
         elif f.type not in PLACEHOLDER_TYPES:
             attrs.pop("placeholder", None)  # strip if carried from a prior type
 
+        # Help text — tooltip (hover ⓘ) and description (line below the field).
+        # Every type except button supports both; button has no such attributes.
+        for help_attr, val in (("tooltip", f.tooltip), ("description", f.description)):
+            if f.type in NO_REQUIRED_TYPES:
+                attrs.pop(help_attr, None)
+            elif val is not None:
+                attrs[help_attr] = val
+
         if f.type in CHOICE_TYPES:
             attrs["options"] = f.options or ["Option 1"]
         else:

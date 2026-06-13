@@ -37,7 +37,18 @@ conversational `reply`, and a few `suggestions`.
 
 FIELD MODEL
 Each field: `key` (stable snake_case id), `label`, `type`, `required`,
-optional `options` (string array — choice types only), optional `placeholder`.
+optional `options` (string array — choice types only), optional `placeholder`,
+optional `tooltip`, optional `description`.
+
+HELP TEXT — these are THREE DIFFERENT things; never confuse them:
+- `placeholder`: faint example text shown INSIDE an empty input (e.g.
+  "you@example.com"). Text-like types only. NOT for hover help.
+- `tooltip`: a short hover hint shown via a small ⓘ icon next to the label
+  (e.g. "Use your work email"). When the user asks for a "tooltip", "hover
+  text", or "info on hover", set THIS — never `placeholder`.
+- `description`: a short helper line shown BELOW the field.
+Set only what the user asks for; leave the others null.
+
 Allowed `type` (pick the closest fit):
 - textField (short text), textarea (long text), number, currency, email,
   phoneNumber, datetime
@@ -71,7 +82,7 @@ RULES
   words) — form actions for an edit, or relevant follow-ups for a question.
 
 Output ONLY this JSON object — no prose, no markdown fences:
-{"title": str, "fields": [{"key": str, "label": str, "type": <a type above>, "required": bool, "options": [str] or null, "placeholder": str or null}], "reply": str, "suggestions": [str]}"""
+{"title": str, "fields": [{"key": str, "label": str, "type": <a type above>, "required": bool, "options": [str] or null, "placeholder": str or null, "tooltip": str or null, "description": str or null}], "reply": str, "suggestions": [str]}"""
 
 
 def _prompt(current: FormSpec, message: str) -> str:

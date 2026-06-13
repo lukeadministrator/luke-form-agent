@@ -40,7 +40,15 @@ class SpecField(BaseModel):
     options: Optional[List[str]] = PydField(
         default=None, description="Choices for select/radio/selectBoxes; null otherwise"
     )
-    placeholder: Optional[str] = None
+    placeholder: Optional[str] = PydField(
+        default=None, description="Faint example text INSIDE the input; text-like types only"
+    )
+    tooltip: Optional[str] = PydField(
+        default=None, description="Short hover help shown via an info icon next to the label"
+    )
+    description: Optional[str] = PydField(
+        default=None, description="Short helper line shown below the field"
+    )
 
 
 class FormSpec(BaseModel):
