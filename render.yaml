@@ -19,3 +19,8 @@ services:
         value: openai/gpt-oss-120b
       - key: GROQ_FALLBACK_MODEL
         value: llama-3.3-70b-versatile
+      # Per-user cap: 200 actions per 3 hours (10800s) to bound AI spend.
+      - key: RATE_LIMIT_MAX
+        value: "200"
+      - key: RATE_LIMIT_WINDOW_SECONDS
+        value: "10800"

@@ -15,12 +15,13 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from .coltorapps import schema_to_spec, spec_to_schema
 from .llm import active_brain, generate_turn
+from .ratelimit import RATE_LIMIT_MAX, RATE_LIMIT_WINDOW, check_and_record
 from .schema import ChatRequest, ChatResponse
 
 load_dotenv()
@@ -45,8 +46,31 @@ def health() -> dict:
     return {"status": "ok", "brain": active_brain()}
 
 
+def _rate_key(req: ChatRequest, request: Request) -> str:
+    """Identify the caller for rate limiting: the signed-in user id when the
+    client sends it, otherwise the originating IP (Render sets X-Forwarded-For)."""
+    if req.user_id:
+        return f"user:{req.user_id}"
+    fwd = request.headers.get("x-forwarded-for", "")
+    ip = fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "anon")
+    return f"ip:{ip}"
+
+
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
+def chat(req: ChatRequest, request: Request) -> ChatResponse:
+    # Per-user rate limit FIRST, before any (paid) LLM call.
+    allowed, retry_after = check_and_record(_rate_key(req, request))
+    if not allowed:
+        hours = RATE_LIMIT_WINDOW // 3600
+        window = f"{hours} hours" if hours != 1 else "hour"
+        mins = max(1, round(retry_after / 60))
+        raise HTTPException(
+            status_code=429,
+            detail=f"You've reached the limit of {RATE_LIMIT_MAX} actions per {window}. "
+            f"Please try again in about {mins} minute{'s' if mins != 1 else ''}.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     # Project the incoming coltorapps schema to a flat spec, keeping the bits we
     # must not lose so the rebuild can merge instead of clobber.
     spec, existing, preserved_entities, preserved_root_ids = schema_to_spec(req.schema)

@@ -71,6 +71,7 @@ class ChatRequest(BaseModel):
     # empty for a brand-new form.
     schema: Optional[dict] = None
     title: Optional[str] = None  # current form name, if the client tracks one
+    user_id: Optional[str] = None  # for per-user rate limiting (falls back to IP)
 
 
 class ChatResponse(BaseModel):
